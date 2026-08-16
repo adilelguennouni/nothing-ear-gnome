@@ -17,20 +17,25 @@ CONFIG_PATH = os.path.expanduser("~/.config/nothing-ear/config.json")
 RFCOMM_CHANNEL = 15
 
 COMMANDS = {
-    "ANC_HIGH": bytes.fromhex("55600102100100000326e0"),
-    "ANC_MID": bytes.fromhex("55600102100100000216c0"),
-    "ANC_LOW": bytes.fromhex("55600102100100000106a0"),
-    "ANC_ADAPTIVE": bytes.fromhex("556001021001000000f680"),
-    "ANC_TRANSPARENCY": bytes.fromhex("5560010210010000043600"),
-    "ANC_OFF": bytes.fromhex("5560010210010000052720"),
-    "EQ_BALANCED": bytes.fromhex("556001041001000000f480"),
-    "EQ_BASS": bytes.fromhex("55600104100100000104a0"),
-    "EQ_TREBLE": bytes.fromhex("55600104100100000214c0"),
-    "EQ_VOICE": bytes.fromhex("55600104100100000324e0"),
-    "LOW_LATENCY_ON": bytes.fromhex("5560010e10010000010ee0"),
-    "LOW_LATENCY_OFF": bytes.fromhex("5560010e1001000000fee0"),
-    "IN_EAR_ON": bytes.fromhex("55600103100100000105a0"),
-    "IN_EAR_OFF": bytes.fromhex("556001031001000000f580"),
+    # ANC Modes (Original Nothing Ear Protocol)
+    "ANC_HIGH": bytes.fromhex("5560010ff00300cf010100e66f"),
+    "ANC_MID": bytes.fromhex("5560010ff00300d5010200e69f"),
+    "ANC_LOW": bytes.fromhex("5560010ff00300d7010300e70f"),
+    "ANC_ADAPTIVE": bytes.fromhex("5560010ff00300dd010400e53f"),
+    "ANC_TRANSPARENCY": bytes.fromhex("5560010ff00300cb010700c5af"),
+    "ANC_OFF": bytes.fromhex("5560010ff00300cd010500c447"),
+    
+    # Feature Toggles
+    "LOW_LATENCY_ON": bytes.fromhex("55600140f0020027010097f7"),
+    "LOW_LATENCY_OFF": bytes.fromhex("55600140f00200280200a704"),
+    "IN_EAR_ON": bytes.fromhex("55600104f00300260101017310"),
+    "IN_EAR_OFF": bytes.fromhex("55600104f0030025010100b294"),
+
+    # Equalizer DSP Presets
+    "EQ_BALANCED": bytes.fromhex("55600105f00200290100f7b5"),
+    "EQ_BASS": bytes.fromhex("55600105f002002a0200e774"),
+    "EQ_TREBLE": bytes.fromhex("55600105f002002b0300d737"),
+    "EQ_VOICE": bytes.fromhex("55600105f002002c040086fb"),
 }
 
 DEFAULT_CONFIG = {
