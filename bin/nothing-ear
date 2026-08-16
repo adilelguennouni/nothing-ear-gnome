@@ -2,7 +2,7 @@
 """
 Nothing Ear Linux Controller
 Universal driver for Nothing Ear (1, 2, 3, (a), Open) & CMF Buds.
-Supports ANC, EQ, FastPair Telemetry, In-Ear & Audio Routing.
+Supports ANC, EQ, Bass Enhance, Spatial Audio, Dual Connect, Gaming Mode, In-Ear & Audio Routing.
 """
 
 import sys
@@ -25,11 +25,28 @@ COMMANDS = {
     "ANC_TRANSPARENCY": bytes.fromhex("5560010ff00300cb010700c5af"),
     "ANC_OFF": bytes.fromhex("5560010ff00300cd010500c447"),
     
-    # Equalizer DSP Presets (Verified with hardware ACK)
+    # Equalizer DSP Presets (Verified with Nothing Ear 3 / 2 / (a) hardware ACK)
     "EQ_BALANCED": bytes.fromhex("55600110f0020001000027a9"),
     "EQ_BASS": bytes.fromhex("55600110f002000101002639"),
     "EQ_TREBLE": bytes.fromhex("55600110f0020001020026c9"),
     "EQ_VOICE": bytes.fromhex("55600110f002000103002759"),
+
+    # Spatial Audio (Captured from Nothing X)
+    "SPATIAL_OFF": bytes.fromhex("5560011ff0010001009d5d"),
+    "SPATIAL_FIXED": bytes.fromhex("5560011ff0010001015c9d"),
+    "SPATIAL_HEADTRACK": bytes.fromhex("5560011ff001000103dd5c"),
+
+    # Bass Enhance / Ultra Bass (Captured from Nothing X)
+    "BASS_OFF": bytes.fromhex("55600162f00200010100743e"),
+    "BASS_LVL1": bytes.fromhex("55600162f00200010101b5fe"),
+    "BASS_LVL2": bytes.fromhex("55600162f0020001010274fe"),
+    "BASS_LVL3": bytes.fromhex("55600162f00200010103343f"),
+    "BASS_LVL4": bytes.fromhex("55600162f00200010104f5fe"),
+    "BASS_LVL5": bytes.fromhex("55600162f00200010105b43d"),
+
+    # Dual Connection (Captured from Nothing X)
+    "DUAL_CONNECT_ON": bytes.fromhex("5560014ff00200010100893c"),
+    "DUAL_CONNECT_OFF": bytes.fromhex("5560014ff0020001000088ac"),
 
     # Feature Toggles (Low Latency & In-Ear)
     "LOW_LATENCY_ON": bytes.fromhex("55600140f00200010100763c"),
@@ -41,6 +58,9 @@ COMMANDS = {
 DEFAULT_CONFIG = {
     "active_anc": "ANC_HIGH",
     "active_eq": "EQ_BALANCED",
+    "spatial_audio": "SPATIAL_OFF",
+    "bass_enhance": "BASS_OFF",
+    "dual_connect": True,
     "game_mode": False,
     "in_ear": True,
     "auto_audio_switch": True,
@@ -289,7 +309,7 @@ def set_bluetooth_audio_output(mac=None):
             return True, sink
         except Exception as e:
             return False, str(e)
-    return False, "Bluetooth audio sink not found (Device not connected as audio output)"
+    return False, "Bluetooth audio sink not found (Device connecting...)"
 
 def get_status_dict():
     mac = get_device_mac()
@@ -306,6 +326,9 @@ def get_status_dict():
         "audio_active": audio_active,
         "active_anc": cfg.get("active_anc", "ANC_HIGH"),
         "active_eq": cfg.get("active_eq", "EQ_BALANCED"),
+        "spatial_audio": cfg.get("spatial_audio", "SPATIAL_OFF"),
+        "bass_enhance": cfg.get("bass_enhance", "BASS_OFF"),
+        "dual_connect": cfg.get("dual_connect", True),
         "game_mode": cfg.get("game_mode", False),
         "in_ear": cfg.get("in_ear", True),
         "auto_audio_switch": cfg.get("auto_audio_switch", True),
@@ -351,6 +374,12 @@ def restore_profile():
         send_command(anc)
         eq = cfg.get("active_eq", "EQ_BALANCED")
         send_command(eq)
+        spatial = cfg.get("spatial_audio", "SPATIAL_OFF")
+        if spatial != "SPATIAL_OFF":
+            send_command(spatial)
+        bass = cfg.get("bass_enhance", "BASS_OFF")
+        if bass != "BASS_OFF":
+            send_command(bass)
         if cfg.get("game_mode"):
             send_command("LOW_LATENCY_ON")
         if cfg.get("in_ear"):
@@ -392,6 +421,7 @@ def main():
             sys.exit(0 if ok else 1)
 
         mapping = {
+            # ANC
             "high": ("ANC_HIGH", "active_anc"),
             "mid": ("ANC_MID", "active_anc"),
             "low": ("ANC_LOW", "active_anc"),
@@ -399,14 +429,37 @@ def main():
             "transparency": ("ANC_TRANSPARENCY", "active_anc"),
             "trans": ("ANC_TRANSPARENCY", "active_anc"),
             "off": ("ANC_OFF", "active_anc"),
+            
+            # EQ
             "eq-balanced": ("EQ_BALANCED", "active_eq"),
             "eq-bass": ("EQ_BASS", "active_eq"),
             "eq-treble": ("EQ_TREBLE", "active_eq"),
             "eq-voice": ("EQ_VOICE", "active_eq"),
+
+            # Spatial Audio
+            "spatial-off": ("SPATIAL_OFF", "spatial_audio"),
+            "spatial-fixed": ("SPATIAL_FIXED", "spatial_audio"),
+            "spatial-headtrack": ("SPATIAL_HEADTRACK", "spatial_audio"),
+
+            # Bass Enhance
+            "bass-off": ("BASS_OFF", "bass_enhance"),
+            "bass-1": ("BASS_LVL1", "bass_enhance"),
+            "bass-2": ("BASS_LVL2", "bass_enhance"),
+            "bass-3": ("BASS_LVL3", "bass_enhance"),
+            "bass-4": ("BASS_LVL4", "bass_enhance"),
+            "bass-5": ("BASS_LVL5", "bass_enhance"),
+
+            # Dual Connect
+            "dual-on": ("DUAL_CONNECT_ON", "dual_connect", True),
+            "dual-off": ("DUAL_CONNECT_OFF", "dual_connect", False),
+
+            # Gaming & In-Ear
             "game-on": ("LOW_LATENCY_ON", "game_mode", True),
             "game-off": ("LOW_LATENCY_OFF", "game_mode", False),
             "in-ear-on": ("IN_EAR_ON", "in_ear", True),
             "in-ear-off": ("IN_EAR_OFF", "in_ear", False),
+            
+            # Preferences
             "auto-audio-on": ("auto_audio_switch", True),
             "auto-audio-off": ("auto_audio_switch", False),
             "restore-profile-on": ("restore_profile_on_connect", True),
