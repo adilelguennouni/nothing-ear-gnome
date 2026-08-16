@@ -17,6 +17,7 @@ import threading
 CONFIG_PATH = os.path.expanduser("~/.config/nothing-ear/config.json")
 STATE_FILE = "/tmp/nothing_ear_live.json"
 LOG_FILE = "/tmp/nothing_ear_events.log"
+UNIX_SOCK_PATH = "/tmp/nothing_ear.sock"
 RFCOMM_CHANNEL = 15
 
 COMMANDS = {
@@ -266,13 +267,18 @@ def get_active_codec(mac=None):
         pass
     return None
 
-def get_bluetooth_audio_sink():
+def get_bluetooth_audio_sink(mac=None):
+    if not mac:
+        mac = get_device_mac()
+    mac_clean = mac.replace(":", "_") if mac else ""
     try:
         out = subprocess.check_output(["pactl", "list", "short", "sinks"], text=True)
         for line in out.strip().splitlines():
             parts = line.split()
-            if len(parts) >= 2 and "bluez_output" in parts[1]:
-                return parts[1]
+            if len(parts) >= 2:
+                sink_name = parts[1]
+                if "bluez_output" in sink_name or (mac_clean and mac_clean in sink_name):
+                    return sink_name
     except Exception:
         pass
     return None
@@ -284,15 +290,33 @@ def is_bluetooth_audio_active():
     except Exception:
         return False
 
-def set_bluetooth_audio_output():
-    sink = get_bluetooth_audio_sink()
+def set_bluetooth_audio_output(mac=None):
+    if not mac:
+        mac = get_device_mac()
+    sink = get_bluetooth_audio_sink(mac)
+    if not sink and mac:
+        try:
+            subprocess.run(["bluetoothctl", "connect", mac], timeout=3.0, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.6)
+            sink = get_bluetooth_audio_sink(mac)
+        except Exception:
+            pass
+
     if sink:
         try:
             subprocess.run(["pactl", "set-default-sink", sink], check=True)
+            try:
+                inputs = subprocess.check_output(["pactl", "list", "short", "sink-inputs"], text=True)
+                for line in inputs.strip().splitlines():
+                    parts = line.split()
+                    if parts:
+                        subprocess.run(["pactl", "move-sink-input", parts[0], sink], stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
             return True, sink
         except Exception as e:
             return False, str(e)
-    return False, "Bluetooth audio sink not found"
+    return False, "Bluetooth audio sink not found (Device connecting...)"
 
 def get_status_dict():
     mac = get_device_mac()
@@ -317,21 +341,39 @@ def get_status_dict():
     }
 
 def send_command(command_key, mac=None):
+    cmd = COMMANDS.get(command_key)
+    if not cmd:
+        return False, "Unknown command"
+
+    # 1. Try sending via Live Daemon IPC Socket (/tmp/nothing_ear.sock)
+    if os.path.exists(UNIX_SOCK_PATH):
+        try:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(1.2)
+            client.connect(UNIX_SOCK_PATH)
+            req = {"action": "send_command", "cmd": command_key}
+            client.sendall(json.dumps(req).encode('utf-8'))
+            resp_data = client.recv(1024).decode('utf-8')
+            client.close()
+            if resp_data:
+                resp = json.loads(resp_data)
+                if resp.get("ok"):
+                    return True, "Success"
+        except Exception:
+            pass
+
+    # 2. Fallback to direct RFCOMM socket if daemon is not running
     if not mac:
         mac = get_device_mac()
     if not mac:
         return False, "No Nothing or CMF earbuds detected"
-
-    cmd = COMMANDS.get(command_key)
-    if not cmd:
-        return False, "Unknown command"
 
     sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
     sock.settimeout(2.5)
     try:
         sock.connect((mac, RFCOMM_CHANNEL))
         sock.sendall(cmd)
-        time.sleep(0.12)
+        time.sleep(0.10)
         try:
             sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -360,9 +402,9 @@ def restore_profile():
     return True, "Profile restored"
 
 def run_daemon():
-    """Runs the live background RFCOMM listener."""
-    from live_daemon import main as daemon_main
-    daemon_main()
+    """Runs the live background RFCOMM listener & IPC bridge."""
+    import live_daemon
+    live_daemon.main()
 
 def main():
     if len(sys.argv) > 1:
@@ -440,9 +482,15 @@ def main():
                     else:
                         cfg[entry[1]] = cmd
                     save_config(cfg)
-                    print(f"✓ Command '{arg}' sent successfully")
+                    print(f"✓ Command '{arg}' sent successfully and saved to config")
                 else:
-                    print(f"❌ Error: {msg}")
+                    # Even if device was offline, save the preference
+                    if len(entry) >= 3 and isinstance(entry[2], bool):
+                        cfg[entry[1]] = entry[2]
+                    else:
+                        cfg[entry[1]] = cmd
+                    save_config(cfg)
+                    print(f"⚠️ Preference '{arg}' saved (Device returned: {msg})")
                 sys.exit(0 if success else 1)
         else:
             print("Usage: nothing-ear [command]")

@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-Nothing Ear Live Telemetry Daemon
-Clean stateless architecture:
-- Opcode 0x01: Exact Battery Percentages (L, R, C)
-- Opcode 0x02: Cradle Charging States (L_chg, R_chg)
-- Opcode 0x03 / 0x04: TWS & In-Ear Wear Detection
+Nothing Ear Live Telemetry Daemon & Command Bridge
+Maintains a continuous RFCOMM listener and provides a Unix Domain Socket (/tmp/nothing_ear.sock)
+for instant, non-blocking command execution (ANC, EQ, Gaming Mode, In-Ear).
 """
 
 import socket
@@ -13,11 +11,33 @@ import time
 import json
 import os
 import sys
+import threading
 
 MAC = "2C:BE:EE:4A:2D:2E"
 RFCOMM_CHANNEL = 15
 STATE_FILE = "/tmp/nothing_ear_live.json"
 LOG_FILE = "/tmp/nothing_ear_events.log"
+UNIX_SOCK_PATH = "/tmp/nothing_ear.sock"
+
+COMMANDS = {
+    "ANC_HIGH": bytes.fromhex("55600102100100000326e0"),
+    "ANC_MID": bytes.fromhex("55600102100100000216c0"),
+    "ANC_LOW": bytes.fromhex("55600102100100000106a0"),
+    "ANC_ADAPTIVE": bytes.fromhex("556001021001000000f680"),
+    "ANC_TRANSPARENCY": bytes.fromhex("5560010210010000043600"),
+    "ANC_OFF": bytes.fromhex("5560010210010000052720"),
+    "EQ_BALANCED": bytes.fromhex("556001041001000000f480"),
+    "EQ_BASS": bytes.fromhex("55600104100100000104a0"),
+    "EQ_TREBLE": bytes.fromhex("55600104100100000214c0"),
+    "EQ_VOICE": bytes.fromhex("55600104100100000324e0"),
+    "LOW_LATENCY_ON": bytes.fromhex("5560010e10010000010ee0"),
+    "LOW_LATENCY_OFF": bytes.fromhex("5560010e1001000000fee0"),
+    "IN_EAR_ON": bytes.fromhex("55600103100100000105a0"),
+    "IN_EAR_OFF": bytes.fromhex("556001031001000000f580"),
+}
+
+rfcomm_sock = None
+sock_lock = threading.Lock()
 
 state = {
     "connected": False,
@@ -30,15 +50,18 @@ state = {
     "case_level": None,
     "case_open": False,
     "last_update": None,
-    "summary": "Detecting...",
+    "summary": "Nothing Ear",
 }
 
 def log_event(msg):
     ts = time.strftime("%H:%M:%S")
     line = f"[{ts}] {msg}\n"
     print(line, end="", flush=True)
-    with open(LOG_FILE, "a") as f:
-        f.write(line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line)
+    except Exception:
+        pass
 
 def save_state():
     state["last_update"] = time.strftime("%X")
@@ -59,8 +82,11 @@ def save_state():
         
     state["summary"] = " • ".join(parts) if parts else "Nothing Ear"
     
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+    except Exception:
+        pass
 
 def parse_packet(data):
     if not data or len(data) < 6:
@@ -134,20 +160,87 @@ def parse_packet(data):
         else:
             idx += 1
 
+def handle_ipc_client(conn):
+    global rfcomm_sock
+    try:
+        raw_msg = conn.recv(1024).decode('utf-8').strip()
+        if not raw_msg:
+            return
+        req = json.loads(raw_msg)
+        action = req.get("action")
+        
+        if action == "send_command":
+            cmd_key = req.get("cmd")
+            payload = COMMANDS.get(cmd_key)
+            if not payload:
+                conn.sendall(json.dumps({"ok": False, "msg": f"Unknown command: {cmd_key}"}).encode('utf-8'))
+                return
+                
+            with sock_lock:
+                if rfcomm_sock and state["connected"]:
+                    try:
+                        rfcomm_sock.sendall(payload)
+                        log_event(f"Command '{cmd_key}' sent via active RFCOMM tunnel")
+                        conn.sendall(json.dumps({"ok": True, "msg": "Success"}).encode('utf-8'))
+                    except Exception as e:
+                        conn.sendall(json.dumps({"ok": False, "msg": str(e)}).encode('utf-8'))
+                else:
+                    conn.sendall(json.dumps({"ok": False, "msg": "Device not connected via RFCOMM"}).encode('utf-8'))
+        elif action == "get_status":
+            conn.sendall(json.dumps({"ok": True, "state": state}).encode('utf-8'))
+    except Exception as e:
+        try:
+            conn.sendall(json.dumps({"ok": False, "msg": str(e)}).encode('utf-8'))
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+def ipc_server_loop():
+    if os.path.exists(UNIX_SOCK_PATH):
+        try:
+            os.unlink(UNIX_SOCK_PATH)
+        except OSError:
+            pass
+            
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(UNIX_SOCK_PATH)
+    os.chmod(UNIX_SOCK_PATH, 0o777)
+    server.listen(10)
+    log_event(f"✓ Command IPC Server listening on {UNIX_SOCK_PATH}")
+    
+    while True:
+        try:
+            conn, _ = server.accept()
+            t = threading.Thread(target=handle_ipc_client, args=(conn,))
+            t.daemon = True
+            t.start()
+        except Exception:
+            pass
+
 def main():
-    log_event("=== NOTHING EAR LIVE DAEMON STARTED ===")
+    global rfcomm_sock
+    log_event("=== NOTHING EAR LIVE DAEMON & IPC BRIDGE STARTED ===")
     save_state()
+    
+    # Start IPC server in separate thread
+    ipc_thread = threading.Thread(target=ipc_server_loop)
+    ipc_thread.daemon = True
+    ipc_thread.start()
     
     while True:
         try:
             sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
             sock.settimeout(2.0)
             sock.connect((MAC, RFCOMM_CHANNEL))
-            state["connected"] = True
-            save_state()
+            
+            with sock_lock:
+                rfcomm_sock = sock
+                state["connected"] = True
+                save_state()
             log_event(f"✓ Connected to {MAC} on RFCOMM 15")
             
-            # Initial inquiry
+            # Initial probe
             for op in [0x01, 0x02, 0x03, 0x0f]:
                 try:
                     sock.sendall(bytes([0x55, 0x60, 0x01, op, 0xf0, 0x00, 0x00, 0x00]))
@@ -168,22 +261,29 @@ def main():
                 if time.time() - last_probe > 3.0:
                     last_probe = time.time()
                     try:
-                        sock.sendall(bytes([0x55, 0x60, 0x01, 0x01, 0xf0, 0x00, 0x00, 0x00]))
-                        sock.sendall(bytes([0x55, 0x60, 0x01, 0x02, 0xf0, 0x00, 0x00, 0x00]))
+                        with sock_lock:
+                            if rfcomm_sock:
+                                rfcomm_sock.sendall(bytes([0x55, 0x60, 0x01, 0x01, 0xf0, 0x00, 0x00, 0x00]))
+                                rfcomm_sock.sendall(bytes([0x55, 0x60, 0x01, 0x02, 0xf0, 0x00, 0x00, 0x00]))
                     except Exception:
                         break
                         
         except Exception:
-            if state["connected"]:
-                state["connected"] = False
-                save_state()
-                log_event("Bluetooth Disconnected (Standby)")
+            with sock_lock:
+                rfcomm_sock = None
+                if state["connected"]:
+                    state["connected"] = False
+                    save_state()
+                    log_event("Bluetooth Disconnected (Standby)")
             time.sleep(1.2)
         finally:
-            try:
-                sock.close()
-            except Exception:
-                pass
+            with sock_lock:
+                if sock:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
+                rfcomm_sock = None
 
 if __name__ == "__main__":
     main()
