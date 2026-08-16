@@ -447,7 +447,7 @@ class NothingEarMenu extends PanelMenu.Button {
                     if (eqMap[info.active_eq]) this._activeEq = eqMap[info.active_eq];
                 }
                 if (info.spatial_audio !== undefined && this._spatialSwitch) {
-                    this._spatialAudio = (info.spatial_audio === "SPATIAL_FIXED" || info.spatial_audio === "SPATIAL_ON");
+                    this._spatialAudio = (info.spatial_audio === "SPATIAL_FIXED" || info.spatial_audio === "SPATIAL_ON" || info.spatial_audio === true);
                     this._spatialSwitch.setToggleState(this._spatialAudio);
                 }
                 if (info.bass_enhance) {

@@ -17,7 +17,7 @@ CONFIG_PATH = os.path.expanduser("~/.config/nothing-ear/config.json")
 RFCOMM_CHANNEL = 15
 
 COMMANDS = {
-    # ANC Modes (Verified)
+    # ANC Modes (Opcode 0x0F - Verified on hardware)
     "ANC_HIGH": bytes.fromhex("5560010ff00300cf010100e66f"),
     "ANC_MID": bytes.fromhex("5560010ff00300d5010200e69f"),
     "ANC_LOW": bytes.fromhex("5560010ff00300d7010300e70f"),
@@ -25,17 +25,17 @@ COMMANDS = {
     "ANC_TRANSPARENCY": bytes.fromhex("5560010ff00300cb010700c5af"),
     "ANC_OFF": bytes.fromhex("5560010ff00300cd010500c447"),
     
-    # Equalizer DSP Presets (Verified with hardware ACK)
-    "EQ_BALANCED": bytes.fromhex("55600110f0020001000027a9"),
-    "EQ_BASS": bytes.fromhex("55600110f002000101002639"),
-    "EQ_TREBLE": bytes.fromhex("55600110f0020001020026c9"),
-    "EQ_VOICE": bytes.fromhex("55600110f002000103002759"),
+    # Equalizer DSP Presets (Opcode 0x1F - Verified from Nothing X)
+    "EQ_BALANCED": bytes.fromhex("5560011ff0010001009d5d"),
+    "EQ_BASS": bytes.fromhex("5560011ff0010001015c9d"),
+    "EQ_TREBLE": bytes.fromhex("5560011ff0010001021c9c"),
+    "EQ_VOICE": bytes.fromhex("5560011ff001000103dd5c"),
 
-    # Spatial Audio (Captured from Nothing X)
-    "SPATIAL_OFF": bytes.fromhex("5560011ff0010001009d5d"),
-    "SPATIAL_FIXED": bytes.fromhex("5560011ff0010001015c9d"),
+    # Spatial Audio (Opcode 0x19 - Verified from Nothing X)
+    "SPATIAL_ON": bytes.fromhex("55600119f002000101017ef9"),
+    "SPATIAL_OFF": bytes.fromhex("55600119f00200010100bf39"),
 
-    # Bass Enhance / Ultra Bass (Verified from Nothing X)
+    # Bass Enhance / Ultra Bass (Opcode 0x4E - Verified from Nothing X)
     "BASS_OFF": bytes.fromhex("5560014ef00200010000986c"),
     "BASS_LVL1": bytes.fromhex("5560014ef00200010102183d"),
     "BASS_LVL2": bytes.fromhex("5560014ef00200010104983f"),
@@ -43,21 +43,23 @@ COMMANDS = {
     "BASS_LVL4": bytes.fromhex("5560014ef00200010108983a"),
     "BASS_LVL5": bytes.fromhex("5560014ef0020001010a19fb"),
 
-    # Dual Connection (Captured from Nothing X)
+    # Dual Connection (Opcode 0x4F - Verified from Nothing X)
     "DUAL_CONNECT_ON": bytes.fromhex("5560014ff00200010100893c"),
     "DUAL_CONNECT_OFF": bytes.fromhex("5560014ff0020001000088ac"),
 
-    # Feature Toggles (Low Latency & In-Ear)
-    "LOW_LATENCY_ON": bytes.fromhex("55600140f00200010100763c"),
-    "LOW_LATENCY_OFF": bytes.fromhex("55600140f0020001020076cc"),
-    "IN_EAR_ON": bytes.fromhex("55600104f003000101010179a4"),
-    "IN_EAR_OFF": bytes.fromhex("55600104f0030001010100b864"),
+    # Gaming Mode / Low Latency (Opcode 0x41 - Verified from Nothing X)
+    "LOW_LATENCY_ON": bytes.fromhex("55600141f00100010151e3"),
+    "LOW_LATENCY_OFF": bytes.fromhex("55600141f00100010211e2"),
+
+    # In-Ear Detection (Opcode 0x5F - Verified from Nothing X)
+    "IN_EAR_ON": bytes.fromhex("5560015ff001000101525d"),
+    "IN_EAR_OFF": bytes.fromhex("5560015ff001000100939d"),
 }
 
 DEFAULT_CONFIG = {
     "active_anc": "ANC_HIGH",
     "active_eq": "EQ_BALANCED",
-    "spatial_audio": "SPATIAL_OFF",
+    "spatial_audio": False,
     "bass_enhance": "BASS_OFF",
     "dual_connect": True,
     "game_mode": False,
@@ -325,7 +327,7 @@ def get_status_dict():
         "audio_active": audio_active,
         "active_anc": cfg.get("active_anc", "ANC_HIGH"),
         "active_eq": cfg.get("active_eq", "EQ_BALANCED"),
-        "spatial_audio": cfg.get("spatial_audio", "SPATIAL_OFF"),
+        "spatial_audio": cfg.get("spatial_audio", False),
         "bass_enhance": cfg.get("bass_enhance", "BASS_OFF"),
         "dual_connect": cfg.get("dual_connect", True),
         "game_mode": cfg.get("game_mode", False),
@@ -350,11 +352,7 @@ def send_command(command_key, mac=None):
     try:
         sock.connect((mac, RFCOMM_CHANNEL))
         sock.sendall(cmd)
-        try:
-            sock.settimeout(1.0)
-            ack = sock.recv(64)
-        except Exception:
-            pass
+        time.sleep(0.08)
         return True, "Success"
     except Exception as e:
         return False, str(e)
@@ -373,9 +371,8 @@ def restore_profile():
         send_command(anc)
         eq = cfg.get("active_eq", "EQ_BALANCED")
         send_command(eq)
-        spatial = cfg.get("spatial_audio", "SPATIAL_OFF")
-        if spatial != "SPATIAL_OFF":
-            send_command(spatial)
+        if cfg.get("spatial_audio"):
+            send_command("SPATIAL_ON")
         bass = cfg.get("bass_enhance", "BASS_OFF")
         if bass != "BASS_OFF":
             send_command(bass)
@@ -436,9 +433,8 @@ def main():
             "eq-voice": ("EQ_VOICE", "active_eq"),
 
             # Spatial Audio
-            "spatial-off": ("SPATIAL_OFF", "spatial_audio"),
-            "spatial-on": ("SPATIAL_FIXED", "spatial_audio"),
-            "spatial-fixed": ("SPATIAL_FIXED", "spatial_audio"),
+            "spatial-on": ("SPATIAL_ON", "spatial_audio", True),
+            "spatial-off": ("SPATIAL_OFF", "spatial_audio", False),
 
             # Bass Enhance
             "bass-off": ("BASS_OFF", "bass_enhance"),
