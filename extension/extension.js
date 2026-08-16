@@ -1,7 +1,7 @@
 /*
  * Nothing Ear Controller - GNOME Shell Extension
  * Fully native, non-closing menus with Pop!_OS notifications, 
- * Spatial Audio, Bass Enhance, Dual Connect, ANC, and Equalizer controls.
+ * Bass Enhance, Spatial Audio (Fixed/Off), ANC with base icons, and EQ controls.
  */
 
 const { GObject, St, Clutter, GLib, Gio } = imports.gi;
@@ -18,7 +18,7 @@ class NothingEarMenu extends PanelMenu.Button {
         this._isConnected = false;
         this._activeMode = 'high';
         this._activeEq = 'eq-balanced';
-        this._activeSpatial = 'spatial-off';
+        this._spatialAudio = false;
         this._activeBass = 'bass-off';
         this._dualConnect = true;
         this._gameMode = false;
@@ -35,57 +35,95 @@ class NothingEarMenu extends PanelMenu.Button {
         });
         this.add_child(icon);
 
-        // Helper: Prevent item click from closing the menu
-        this._makePersistentItem = (item) => {
-            item.close = () => {};
-            item.activate = function(event) {
-                if (this._action) this._action(event);
-                this.emit('activate', event);
-            };
+        this._buildMenu();
+
+        this._openStateChangedId = this.menu.connect('open-state-changed', (menu, isOpen) => {
+            if (isOpen) {
+                this._updateStatus();
+            }
+        });
+    }
+
+    _makePersistent(item, callback) {
+        // Disconnect GNOME's default auto-close signal listener on activate
+        if (item._menuActivateId) {
+            try {
+                item.disconnect(item._menuActivateId);
+            } catch (e) {}
+            item._menuActivateId = null;
+        }
+        item.close = () => {};
+        item.activate = function(event) {
+            if (callback) callback();
         };
+        return item;
+    }
+
+    _buildMenu() {
+        this.menu.removeAll();
 
         // 1. Header (Status)
-        this._headerItem = new PopupMenu.PopupMenuItem('Nothing Ear • Disconnected', { reactive: false });
+        this._headerItem = new PopupMenu.PopupMenuItem('Nothing Ear', { reactive: false });
+        this._headerItem.label.style = 'font-weight: 700; font-size: 13px;';
+        let headIcon = new St.Icon({
+            icon_name: 'audio-headphones-symbolic',
+            style_class: 'popup-menu-icon',
+        });
+        this._headerItem.insert_child_at_index(headIcon, 0);
         this.menu.addMenuItem(this._headerItem);
 
         // 2. Battery & Codec Row
         this._batteryItem = new PopupMenu.PopupMenuItem('Loading…', { reactive: false });
+        this._batteryItem.label.style = 'font-size: 11px; opacity: 0.85;';
+        let battIcon = new St.Icon({
+            icon_name: 'battery-symbolic',
+            style_class: 'popup-menu-icon',
+        });
+        this._batteryItem.insert_child_at_index(battIcon, 0);
         this._batteryItem.visible = false;
         this.menu.addMenuItem(this._batteryItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // 3. Expandable Submenu for ANC Levels (Items don't close menu)
-        this._ancSubMenu = new PopupMenu.PopupSubMenuMenuItem('Active Noise Cancellation');
+        // 3. Expandable Submenu for ANC Levels (With Original Base Icons)
+        this._ancSubMenu = new PopupMenu.PopupSubMenuMenuItem('Noise Control (ANC)');
+        this._ancSubMenu.menu.close = () => {};
+        this._ancSubMenu.close = () => {};
         let ancIcon = new St.Icon({
-            icon_name: 'audio-headset-symbolic',
+            icon_name: 'security-high-symbolic',
             style_class: 'popup-menu-icon',
         });
         this._ancSubMenu.insert_child_at_index(ancIcon, 0);
 
         let ancModes = [
-            { key: 'high', label: 'High' },
-            { key: 'mid', label: 'Mid' },
-            { key: 'low', label: 'Low' },
-            { key: 'adaptive', label: 'Adaptive' },
+            { key: 'high', label: 'High', icon: 'security-high-symbolic' },
+            { key: 'mid', label: 'Medium', icon: 'security-medium-symbolic' },
+            { key: 'low', label: 'Low', icon: 'security-low-symbolic' },
+            { key: 'adaptive', label: 'Adaptive', icon: 'preferences-system-symbolic' },
         ];
 
         this._ancItems = {};
 
         ancModes.forEach(m => {
             let item = new PopupMenu.PopupMenuItem(m.label);
-            this._makePersistentItem(item);
-            item.connect('activate', () => {
-                this._selectMode(m.key, `ANC Mode: ${m.label}`);
+            let itemIcon = new St.Icon({
+                icon_name: m.icon,
+                style_class: 'popup-menu-icon',
             });
+            item.insert_child_at_index(itemIcon, 0);
             this._ancItems[m.key] = item;
             this._ancSubMenu.menu.addMenuItem(item);
+            this._makePersistent(item, () => {
+                this._selectMode(m.key, `Noise Control: ${m.label}`);
+            });
         });
 
         this.menu.addMenuItem(this._ancSubMenu);
 
         // 4. Expandable Submenu for Equalizer DSP (Items don't close menu)
         this._eqSubMenu = new PopupMenu.PopupSubMenuMenuItem('Equalizer (EQ)');
+        this._eqSubMenu.menu.close = () => {};
+        this._eqSubMenu.close = () => {};
         let eqIcon = new St.Icon({
             icon_name: 'audio-speakers-symbolic',
             style_class: 'popup-menu-icon',
@@ -103,46 +141,19 @@ class NothingEarMenu extends PanelMenu.Button {
 
         eqModes.forEach(m => {
             let item = new PopupMenu.PopupMenuItem(m.label);
-            this._makePersistentItem(item);
-            item.connect('activate', () => {
-                this._selectEq(m.key, `Equalizer: ${m.label}`);
-            });
             this._eqItems[m.key] = item;
             this._eqSubMenu.menu.addMenuItem(item);
+            this._makePersistent(item, () => {
+                this._selectEq(m.key, `Equalizer: ${m.label}`);
+            });
         });
 
         this.menu.addMenuItem(this._eqSubMenu);
 
-        // 5. Expandable Submenu for Spatial Audio (Son Spatial)
-        this._spatialSubMenu = new PopupMenu.PopupSubMenuMenuItem('Spatial Audio');
-        let spatialIcon = new St.Icon({
-            icon_name: 'emblem-shared-symbolic',
-            style_class: 'popup-menu-icon',
-        });
-        this._spatialSubMenu.insert_child_at_index(spatialIcon, 0);
-
-        let spatialModes = [
-            { key: 'spatial-off', label: 'Off' },
-            { key: 'spatial-fixed', label: 'Fixed (Fixe)' },
-            { key: 'spatial-headtrack', label: 'Head Tracking (Suivi)' },
-        ];
-
-        this._spatialItems = {};
-
-        spatialModes.forEach(m => {
-            let item = new PopupMenu.PopupMenuItem(m.label);
-            this._makePersistentItem(item);
-            item.connect('activate', () => {
-                this._selectSpatial(m.key, `Spatial Audio: ${m.label}`);
-            });
-            this._spatialItems[m.key] = item;
-            this._spatialSubMenu.menu.addMenuItem(item);
-        });
-
-        this.menu.addMenuItem(this._spatialSubMenu);
-
-        // 6. Expandable Submenu for Bass Enhance (Ultra Bass)
+        // 5. Expandable Submenu for Bass Enhance (Ultra Bass)
         this._bassSubMenu = new PopupMenu.PopupSubMenuMenuItem('Bass Enhance (Ultra Bass)');
+        this._bassSubMenu.menu.close = () => {};
+        this._bassSubMenu.close = () => {};
         let bassIcon = new St.Icon({
             icon_name: 'media-playlist-shuffle-symbolic',
             style_class: 'popup-menu-icon',
@@ -162,43 +173,57 @@ class NothingEarMenu extends PanelMenu.Button {
 
         bassModes.forEach(m => {
             let item = new PopupMenu.PopupMenuItem(m.label);
-            this._makePersistentItem(item);
-            item.connect('activate', () => {
-                this._selectBass(m.key, `Bass Enhance: ${m.label}`);
-            });
             this._bassItems[m.key] = item;
             this._bassSubMenu.menu.addMenuItem(item);
+            this._makePersistent(item, () => {
+                this._selectBass(m.key, `Bass Enhance: ${m.label}`);
+            });
         });
 
         this.menu.addMenuItem(this._bassSubMenu);
 
-        // 7. Transparency Mode (Persistent)
+        // 6. Transparency Mode (Persistent with Base Icon)
         this._transItem = new PopupMenu.PopupMenuItem('Transparency');
-        this._makePersistentItem(this._transItem);
         let transIcon = new St.Icon({
             icon_name: 'audio-speakers-symbolic',
             style_class: 'popup-menu-icon',
         });
         this._transItem.insert_child_at_index(transIcon, 0);
-        this._transItem.connect('activate', () => {
+        this.menu.addMenuItem(this._transItem);
+        this._makePersistent(this._transItem, () => {
             this._selectMode('transparency', 'Transparency Mode');
         });
-        this.menu.addMenuItem(this._transItem);
 
-        // 8. Off Mode (Persistent)
-        this._offItem = new PopupMenu.PopupMenuItem('Off (Noise Control Off)');
-        this._makePersistentItem(this._offItem);
+        // 7. Off Mode (Persistent with Base Icon)
+        this._offItem = new PopupMenu.PopupMenuItem('Noise Control Off');
         let offIcon = new St.Icon({
             icon_name: 'media-playback-stop-symbolic',
             style_class: 'popup-menu-icon',
         });
         this._offItem.insert_child_at_index(offIcon, 0);
-        this._offItem.connect('activate', () => {
+        this.menu.addMenuItem(this._offItem);
+        this._makePersistent(this._offItem, () => {
             this._selectMode('off', 'Noise Control Off');
         });
-        this.menu.addMenuItem(this._offItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // 8. Spatial Audio (Simple On/Off Switch)
+        this._spatialSwitch = new PopupMenu.PopupSwitchMenuItem('Spatial Audio (Son Spatial)', this._spatialAudio);
+        let spatialIcon = new St.Icon({
+            icon_name: 'emblem-shared-symbolic',
+            style_class: 'popup-menu-icon',
+        });
+        this._spatialSwitch.insert_child_at_index(spatialIcon, 0);
+        this._spatialSwitch.activate = function(event) {
+            this.toggle();
+        };
+        this._spatialSwitch.connect('toggled', (item, state) => {
+            this._spatialAudio = state;
+            this._sendCmd(state ? 'spatial-on' : 'spatial-off');
+            this._showNotification('Nothing Ear', state ? 'Spatial Audio ON' : 'Spatial Audio OFF');
+        });
+        this.menu.addMenuItem(this._spatialSwitch);
 
         // 9. Earbuds Quick Switches (Persistent)
         this._dualSwitch = new PopupMenu.PopupSwitchMenuItem('Dual Connection (Multi-Point)', this._dualConnect);
@@ -213,7 +238,7 @@ class NothingEarMenu extends PanelMenu.Button {
         this._dualSwitch.connect('toggled', (item, state) => {
             this._dualConnect = state;
             this._sendCmd(state ? 'dual-on' : 'dual-off');
-            this._showNotification('Nothing Ear', state ? 'Dual Connect ON' : 'Dual Connect OFF');
+            this._showNotification('Nothing Ear', state ? 'Dual Connection ON' : 'Dual Connection OFF');
         });
         this.menu.addMenuItem(this._dualSwitch);
 
@@ -253,22 +278,23 @@ class NothingEarMenu extends PanelMenu.Button {
 
         // 10. Actionable Audio Route Button
         this._audioRouteItem = new PopupMenu.PopupMenuItem('Switch Audio Output to Earbuds');
-        this._makePersistentItem(this._audioRouteItem);
         let audioIcon = new St.Icon({
             icon_name: 'audio-volume-high-symbolic',
             style_class: 'popup-menu-icon',
         });
         this._audioRouteItem.insert_child_at_index(audioIcon, 0);
-        this._audioRouteItem.connect('activate', () => {
+        this.menu.addMenuItem(this._audioRouteItem);
+        this._makePersistent(this._audioRouteItem, () => {
             this._sendCmd('switch-audio');
             this._showNotification('Nothing Ear', 'Switched audio output to Earbuds');
             this._audioRouteItem.visible = false;
         });
         this._audioRouteItem.visible = false;
-        this.menu.addMenuItem(this._audioRouteItem);
 
         // 11. Preferences Submenu
         this._prefSubMenu = new PopupMenu.PopupSubMenuMenuItem('Preferences');
+        this._prefSubMenu.menu.close = () => {};
+        this._prefSubMenu.close = () => {};
         let prefIcon = new St.Icon({
             icon_name: 'preferences-system-symbolic',
             style_class: 'popup-menu-icon',
@@ -308,20 +334,14 @@ class NothingEarMenu extends PanelMenu.Button {
         this._prefSubMenu.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         this._sysSettingsItem = new PopupMenu.PopupMenuItem('System Sound Settings…');
-        this._sysSettingsItem.connect('activate', () => {
+        this._prefSubMenu.menu.addMenuItem(this._sysSettingsItem);
+        this._makePersistent(this._sysSettingsItem, () => {
             GLib.spawn_command_line_async('gnome-control-center sound');
         });
-        this._prefSubMenu.menu.addMenuItem(this._sysSettingsItem);
 
         this.menu.addMenuItem(this._prefSubMenu);
 
         this._highlightActiveMode();
-
-        this._openStateChangedId = this.menu.connect('open-state-changed', (menu, isOpen) => {
-            if (isOpen) {
-                this._updateStatus();
-            }
-        });
     }
 
     _selectMode(modeKey, label) {
@@ -335,13 +355,6 @@ class NothingEarMenu extends PanelMenu.Button {
         this._activeEq = eqKey;
         this._highlightActiveMode();
         this._sendCmd(eqKey);
-        this._showNotification('Nothing Ear', label);
-    }
-
-    _selectSpatial(spatialKey, label) {
-        this._activeSpatial = spatialKey;
-        this._highlightActiveMode();
-        this._sendCmd(spatialKey);
         this._showNotification('Nothing Ear', label);
     }
 
@@ -373,9 +386,6 @@ class NothingEarMenu extends PanelMenu.Button {
         }
         for (let [key, item] of Object.entries(this._eqItems)) {
             item.setOrnament(key === this._activeEq ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
-        }
-        for (let [key, item] of Object.entries(this._spatialItems)) {
-            item.setOrnament(key === this._activeSpatial ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
         }
         for (let [key, item] of Object.entries(this._bassItems)) {
             item.setOrnament(key === this._activeBass ? PopupMenu.Ornament.DOT : PopupMenu.Ornament.NONE);
@@ -433,12 +443,12 @@ class NothingEarMenu extends PanelMenu.Button {
                     if (map[info.active_anc]) this._activeMode = map[info.active_anc];
                 }
                 if (info.active_eq) {
-                    let map = { "EQ_BALANCED": "eq-balanced", "EQ_BASS": "eq-bass", "EQ_TREBLE": "eq-treble", "EQ_VOICE": "eq-voice" };
-                    if (map[info.active_eq]) this._activeEq = map[info.active_eq];
+                    let eqMap = { "EQ_BALANCED": "eq-balanced", "EQ_BASS": "eq-bass", "EQ_TREBLE": "eq-treble", "EQ_VOICE": "eq-voice" };
+                    if (eqMap[info.active_eq]) this._activeEq = eqMap[info.active_eq];
                 }
-                if (info.spatial_audio) {
-                    let map = { "SPATIAL_OFF": "spatial-off", "SPATIAL_FIXED": "spatial-fixed", "SPATIAL_HEADTRACK": "spatial-headtrack" };
-                    if (map[info.spatial_audio]) this._activeSpatial = map[info.spatial_audio];
+                if (info.spatial_audio !== undefined && this._spatialSwitch) {
+                    this._spatialAudio = (info.spatial_audio === "SPATIAL_FIXED" || info.spatial_audio === "SPATIAL_ON");
+                    this._spatialSwitch.setToggleState(this._spatialAudio);
                 }
                 if (info.bass_enhance) {
                     let map = { "BASS_OFF": "bass-off", "BASS_LVL1": "bass-1", "BASS_LVL2": "bass-2", "BASS_LVL3": "bass-3", "BASS_LVL4": "bass-4", "BASS_LVL5": "bass-5" };

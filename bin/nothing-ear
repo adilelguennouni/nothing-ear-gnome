@@ -25,7 +25,7 @@ COMMANDS = {
     "ANC_TRANSPARENCY": bytes.fromhex("5560010ff00300cb010700c5af"),
     "ANC_OFF": bytes.fromhex("5560010ff00300cd010500c447"),
     
-    # Equalizer DSP Presets (Verified with Nothing Ear 3 / 2 / (a) hardware ACK)
+    # Equalizer DSP Presets (Verified with hardware ACK)
     "EQ_BALANCED": bytes.fromhex("55600110f0020001000027a9"),
     "EQ_BASS": bytes.fromhex("55600110f002000101002639"),
     "EQ_TREBLE": bytes.fromhex("55600110f0020001020026c9"),
@@ -34,7 +34,6 @@ COMMANDS = {
     # Spatial Audio (Captured from Nothing X)
     "SPATIAL_OFF": bytes.fromhex("5560011ff0010001009d5d"),
     "SPATIAL_FIXED": bytes.fromhex("5560011ff0010001015c9d"),
-    "SPATIAL_HEADTRACK": bytes.fromhex("5560011ff001000103dd5c"),
 
     # Bass Enhance / Ultra Bass (Captured from Nothing X)
     "BASS_OFF": bytes.fromhex("55600162f00200010100743e"),
@@ -438,8 +437,8 @@ def main():
 
             # Spatial Audio
             "spatial-off": ("SPATIAL_OFF", "spatial_audio"),
+            "spatial-on": ("SPATIAL_FIXED", "spatial_audio"),
             "spatial-fixed": ("SPATIAL_FIXED", "spatial_audio"),
-            "spatial-headtrack": ("SPATIAL_HEADTRACK", "spatial_audio"),
 
             # Bass Enhance
             "bass-off": ("BASS_OFF", "bass_enhance"),
