@@ -1,12 +1,16 @@
 {
   "name": "Nothing Ear Controller",
-  "description": "Quick ANC and mode controller for Nothing Ear and CMF earbuds in the top bar",
+  "description": "Fast and native ANC, Gaming Mode, and battery telemetry controller for Nothing Ear and CMF earbuds in GNOME Shell",
   "uuid": "nothing-ear-controller@gnome",
+  "url": "https://github.com/adilelguennouni/nothing-ear-gnome",
   "shell-version": [
     "42",
     "42.9",
     "43",
-    "44"
+    "44",
+    "45",
+    "46",
+    "47"
   ],
-  "version": 2
+  "version": 3
 }
