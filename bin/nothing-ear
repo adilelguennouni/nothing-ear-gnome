@@ -35,13 +35,13 @@ COMMANDS = {
     "SPATIAL_OFF": bytes.fromhex("5560011ff0010001009d5d"),
     "SPATIAL_FIXED": bytes.fromhex("5560011ff0010001015c9d"),
 
-    # Bass Enhance / Ultra Bass (Captured from Nothing X)
-    "BASS_OFF": bytes.fromhex("55600162f00200010100743e"),
-    "BASS_LVL1": bytes.fromhex("55600162f00200010101b5fe"),
-    "BASS_LVL2": bytes.fromhex("55600162f0020001010274fe"),
-    "BASS_LVL3": bytes.fromhex("55600162f00200010103343f"),
-    "BASS_LVL4": bytes.fromhex("55600162f00200010104f5fe"),
-    "BASS_LVL5": bytes.fromhex("55600162f00200010105b43d"),
+    # Bass Enhance / Ultra Bass (Verified from Nothing X)
+    "BASS_OFF": bytes.fromhex("5560014ef00200010000986c"),
+    "BASS_LVL1": bytes.fromhex("5560014ef00200010102183d"),
+    "BASS_LVL2": bytes.fromhex("5560014ef00200010104983f"),
+    "BASS_LVL3": bytes.fromhex("5560014ef0020001010619fe"),
+    "BASS_LVL4": bytes.fromhex("5560014ef00200010108983a"),
+    "BASS_LVL5": bytes.fromhex("5560014ef0020001010a19fb"),
 
     # Dual Connection (Captured from Nothing X)
     "DUAL_CONNECT_ON": bytes.fromhex("5560014ff00200010100893c"),
