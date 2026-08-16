@@ -1,7 +1,7 @@
 /*
  * Nothing Ear Controller - GNOME Shell Extension
  * Fully native, non-closing menus with Pop!_OS notifications, 
- * Bass Enhance, Spatial Audio (Fixed/Off), ANC with base icons, and EQ controls.
+ * Bass Enhance, Spatial Audio, ANC, EQ, HD Audio, Call Auto-Transparency & Super Mic.
  */
 
 const { GObject, St, Clutter, GLib, Gio } = imports.gi;
@@ -23,6 +23,9 @@ class NothingEarMenu extends PanelMenu.Button {
         this._dualConnect = true;
         this._gameMode = false;
         this._inEar = true;
+        this._hdAudio = true;
+        this._callTransparency = true;
+        this._superMic = true;
         this._autoAudio = true;
         this._restoreProfile = true;
         this._notifications = true;
@@ -274,9 +277,54 @@ class NothingEarMenu extends PanelMenu.Button {
         });
         this.menu.addMenuItem(this._inEarSwitch);
 
+        // 10. Advanced Features Submenu (Bonus Controls)
+        this._advSubMenu = new PopupMenu.PopupSubMenuMenuItem('Advanced Audio & Mic');
+        this._advSubMenu.menu.close = () => {};
+        this._advSubMenu.close = () => {};
+        let advIcon = new St.Icon({
+            icon_name: 'audio-input-microphone-symbolic',
+            style_class: 'popup-menu-icon',
+        });
+        this._advSubMenu.insert_child_at_index(advIcon, 0);
+
+        this._hdAudioSwitch = new PopupMenu.PopupSwitchMenuItem('High-Res Audio (LDAC Mode)', this._hdAudio);
+        this._hdAudioSwitch.activate = function(event) {
+            this.toggle();
+        };
+        this._hdAudioSwitch.connect('toggled', (item, state) => {
+            this._hdAudio = state;
+            this._sendCmd(state ? 'hd-audio-on' : 'hd-audio-off');
+            this._showNotification('Nothing Ear', state ? 'High-Res LDAC ON' : 'Standard AAC ON');
+        });
+        this._advSubMenu.menu.addMenuItem(this._hdAudioSwitch);
+
+        this._callTransSwitch = new PopupMenu.PopupSwitchMenuItem('Auto-Transparency in Calls', this._callTransparency);
+        this._callTransSwitch.activate = function(event) {
+            this.toggle();
+        };
+        this._callTransSwitch.connect('toggled', (item, state) => {
+            this._callTransparency = state;
+            this._sendCmd(state ? 'call-trans-on' : 'call-trans-off');
+            this._showNotification('Nothing Ear', state ? 'Call Auto-Transparency ON' : 'Call Auto-Transparency OFF');
+        });
+        this._advSubMenu.menu.addMenuItem(this._callTransSwitch);
+
+        this._superMicSwitch = new PopupMenu.PopupSwitchMenuItem('Clear Voice Super Mic', this._superMic);
+        this._superMicSwitch.activate = function(event) {
+            this.toggle();
+        };
+        this._superMicSwitch.connect('toggled', (item, state) => {
+            this._superMic = state;
+            this._sendCmd(state ? 'super-mic-on' : 'super-mic-off');
+            this._showNotification('Nothing Ear', state ? 'Super Mic AI ON' : 'Super Mic AI OFF');
+        });
+        this._advSubMenu.menu.addMenuItem(this._superMicSwitch);
+
+        this.menu.addMenuItem(this._advSubMenu);
+
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // 10. Actionable Audio Route Button
+        // 11. Actionable Audio Route Button
         this._audioRouteItem = new PopupMenu.PopupMenuItem('Switch Audio Output to Earbuds');
         let audioIcon = new St.Icon({
             icon_name: 'audio-volume-high-symbolic',
@@ -291,7 +339,7 @@ class NothingEarMenu extends PanelMenu.Button {
         });
         this._audioRouteItem.visible = false;
 
-        // 11. Preferences Submenu
+        // 12. Preferences Submenu
         this._prefSubMenu = new PopupMenu.PopupSubMenuMenuItem('Preferences');
         this._prefSubMenu.menu.close = () => {};
         this._prefSubMenu.close = () => {};
@@ -456,6 +504,15 @@ class NothingEarMenu extends PanelMenu.Button {
                 }
                 if (info.dual_connect !== undefined && this._dualSwitch) {
                     this._dualSwitch.setToggleState(info.dual_connect);
+                }
+                if (info.hd_audio !== undefined && this._hdAudioSwitch) {
+                    this._hdAudioSwitch.setToggleState(info.hd_audio);
+                }
+                if (info.call_transparency !== undefined && this._callTransSwitch) {
+                    this._callTransSwitch.setToggleState(info.call_transparency);
+                }
+                if (info.super_mic !== undefined && this._superMicSwitch) {
+                    this._superMicSwitch.setToggleState(info.super_mic);
                 }
 
                 this._highlightActiveMode();

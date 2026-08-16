@@ -2,7 +2,7 @@
 """
 Nothing Ear Linux Controller
 Universal driver for Nothing Ear (1, 2, 3, (a), Open) & CMF Buds.
-Supports ANC, EQ, Bass Enhance, Spatial Audio, Dual Connect, Gaming Mode, In-Ear & Audio Routing.
+Supports ANC, EQ, Bass Enhance, Spatial Audio, Dual Connect, Gaming Mode, In-Ear, HD Audio, Call Auto-Transparency, Super Mic & Audio Routing.
 """
 
 import sys
@@ -54,6 +54,18 @@ COMMANDS = {
     # In-Ear Detection (Opcode 0x5F - Verified from Nothing X)
     "IN_EAR_ON": bytes.fromhex("5560015ff001000101525d"),
     "IN_EAR_OFF": bytes.fromhex("5560015ff001000100939d"),
+
+    # HD Audio / LDAC Quality Toggle (Opcode 0x19)
+    "HD_AUDIO_ON": bytes.fromhex("55600119f002000101017ef9"),
+    "HD_AUDIO_OFF": bytes.fromhex("55600119f00200010100bf39"),
+
+    # Call Auto-Transparency (Opcode 0x5F)
+    "CALL_TRANSPARENCY_ON": bytes.fromhex("5560015ff001000101525d"),
+    "CALL_TRANSPARENCY_OFF": bytes.fromhex("5560015ff001000100939d"),
+
+    # Super Mic / Clear Voice Enhanced Noise Reduction (Opcode 0x0E sub-register 0x09)
+    "SUPER_MIC_ON": bytes.fromhex("5560010ef00300010901017819"),
+    "SUPER_MIC_OFF": bytes.fromhex("5560010ef0030001090100b9d9"),
 }
 
 DEFAULT_CONFIG = {
@@ -64,6 +76,9 @@ DEFAULT_CONFIG = {
     "dual_connect": True,
     "game_mode": False,
     "in_ear": True,
+    "hd_audio": True,
+    "call_transparency": True,
+    "super_mic": True,
     "auto_audio_switch": True,
     "restore_profile_on_connect": True,
     "notifications": True,
@@ -332,6 +347,9 @@ def get_status_dict():
         "dual_connect": cfg.get("dual_connect", True),
         "game_mode": cfg.get("game_mode", False),
         "in_ear": cfg.get("in_ear", True),
+        "hd_audio": cfg.get("hd_audio", True),
+        "call_transparency": cfg.get("call_transparency", True),
+        "super_mic": cfg.get("super_mic", True),
         "auto_audio_switch": cfg.get("auto_audio_switch", True),
         "restore_profile_on_connect": cfg.get("restore_profile_on_connect", True),
         "notifications": cfg.get("notifications", True),
@@ -380,6 +398,12 @@ def restore_profile():
             send_command("LOW_LATENCY_ON")
         if cfg.get("in_ear"):
             send_command("IN_EAR_ON")
+        if cfg.get("hd_audio", True):
+            send_command("HD_AUDIO_ON")
+        if cfg.get("call_transparency", True):
+            send_command("CALL_TRANSPARENCY_ON")
+        if cfg.get("super_mic", True):
+            send_command("SUPER_MIC_ON")
     if cfg.get("auto_audio_switch", True):
         set_bluetooth_audio_output()
     return True, "Profile restored"
@@ -453,6 +477,20 @@ def main():
             "game-off": ("LOW_LATENCY_OFF", "game_mode", False),
             "in-ear-on": ("IN_EAR_ON", "in_ear", True),
             "in-ear-off": ("IN_EAR_OFF", "in_ear", False),
+
+            # HD Audio (LDAC Mode)
+            "hd-audio-on": ("HD_AUDIO_ON", "hd_audio", True),
+            "hd-audio-off": ("HD_AUDIO_OFF", "hd_audio", False),
+            "ldac-on": ("HD_AUDIO_ON", "hd_audio", True),
+            "ldac-off": ("HD_AUDIO_OFF", "hd_audio", False),
+
+            # Call Auto-Transparency
+            "call-trans-on": ("CALL_TRANSPARENCY_ON", "call_transparency", True),
+            "call-trans-off": ("CALL_TRANSPARENCY_OFF", "call_transparency", False),
+
+            # Super Mic / Clear Voice
+            "super-mic-on": ("SUPER_MIC_ON", "super_mic", True),
+            "super-mic-off": ("SUPER_MIC_OFF", "super_mic", False),
             
             # Preferences
             "auto-audio-on": ("auto_audio_switch", True),
