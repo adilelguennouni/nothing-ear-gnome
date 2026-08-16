@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Nothing Ear Linux Controller
-Universal driver for Nothing Ear (1, 2, 3, (a), Open) & CMF Buds.
-Supports ANC, EQ, Bass Enhance, Spatial Audio, Dual Connect, Gaming Mode, In-Ear, HD Audio, Call Auto-Transparency, Super Mic & Audio Routing.
+Clean, fast and robust controller for Nothing Ear (1, 2, 3, (a), Open) & CMF Buds.
+Supports ANC, Low Latency Gaming Mode, Multi-element Battery Telemetry, Codec & Audio Routing.
 """
 
 import sys
@@ -24,61 +24,15 @@ COMMANDS = {
     "ANC_ADAPTIVE": bytes.fromhex("5560010ff00300dd010400e53f"),
     "ANC_TRANSPARENCY": bytes.fromhex("5560010ff00300cb010700c5af"),
     "ANC_OFF": bytes.fromhex("5560010ff00300cd010500c447"),
-    
-    # Equalizer DSP Presets (Opcode 0x1F - Verified from Nothing X)
-    "EQ_BALANCED": bytes.fromhex("5560011ff0010001009d5d"),
-    "EQ_BASS": bytes.fromhex("5560011ff0010001015c9d"),
-    "EQ_TREBLE": bytes.fromhex("5560011ff0010001021c9c"),
-    "EQ_VOICE": bytes.fromhex("5560011ff001000103dd5c"),
-
-    # Spatial Audio (Opcode 0x19 - Verified from Nothing X)
-    "SPATIAL_ON": bytes.fromhex("55600119f002000101017ef9"),
-    "SPATIAL_OFF": bytes.fromhex("55600119f00200010100bf39"),
-
-    # Bass Enhance / Ultra Bass (Opcode 0x4E - Verified from Nothing X)
-    "BASS_OFF": bytes.fromhex("5560014ef00200010000986c"),
-    "BASS_LVL1": bytes.fromhex("5560014ef00200010102183d"),
-    "BASS_LVL2": bytes.fromhex("5560014ef00200010104983f"),
-    "BASS_LVL3": bytes.fromhex("5560014ef0020001010619fe"),
-    "BASS_LVL4": bytes.fromhex("5560014ef00200010108983a"),
-    "BASS_LVL5": bytes.fromhex("5560014ef0020001010a19fb"),
-
-    # Dual Connection (Opcode 0x4F - Verified from Nothing X)
-    "DUAL_CONNECT_ON": bytes.fromhex("5560014ff00200010100893c"),
-    "DUAL_CONNECT_OFF": bytes.fromhex("5560014ff0020001000088ac"),
 
     # Gaming Mode / Low Latency (Opcode 0x41 - Verified from Nothing X)
     "LOW_LATENCY_ON": bytes.fromhex("55600141f00100010151e3"),
     "LOW_LATENCY_OFF": bytes.fromhex("55600141f00100010211e2"),
-
-    # In-Ear Detection (Opcode 0x5F - Verified from Nothing X)
-    "IN_EAR_ON": bytes.fromhex("5560015ff001000101525d"),
-    "IN_EAR_OFF": bytes.fromhex("5560015ff001000100939d"),
-
-    # HD Audio / LDAC Quality Toggle (Opcode 0x19)
-    "HD_AUDIO_ON": bytes.fromhex("55600119f002000101017ef9"),
-    "HD_AUDIO_OFF": bytes.fromhex("55600119f00200010100bf39"),
-
-    # Call Auto-Transparency (Opcode 0x5F)
-    "CALL_TRANSPARENCY_ON": bytes.fromhex("5560015ff001000101525d"),
-    "CALL_TRANSPARENCY_OFF": bytes.fromhex("5560015ff001000100939d"),
-
-    # Super Mic / Clear Voice Enhanced Noise Reduction (Opcode 0x0E sub-register 0x09)
-    "SUPER_MIC_ON": bytes.fromhex("5560010ef00300010901017819"),
-    "SUPER_MIC_OFF": bytes.fromhex("5560010ef0030001090100b9d9"),
 }
 
 DEFAULT_CONFIG = {
     "active_anc": "ANC_HIGH",
-    "active_eq": "EQ_BALANCED",
-    "spatial_audio": False,
-    "bass_enhance": "BASS_OFF",
-    "dual_connect": True,
     "game_mode": False,
-    "in_ear": True,
-    "hd_audio": True,
-    "call_transparency": True,
-    "super_mic": True,
     "auto_audio_switch": True,
     "restore_profile_on_connect": True,
     "notifications": True,
@@ -341,15 +295,7 @@ def get_status_dict():
         "codec": codec,
         "audio_active": audio_active,
         "active_anc": cfg.get("active_anc", "ANC_HIGH"),
-        "active_eq": cfg.get("active_eq", "EQ_BALANCED"),
-        "spatial_audio": cfg.get("spatial_audio", False),
-        "bass_enhance": cfg.get("bass_enhance", "BASS_OFF"),
-        "dual_connect": cfg.get("dual_connect", True),
         "game_mode": cfg.get("game_mode", False),
-        "in_ear": cfg.get("in_ear", True),
-        "hd_audio": cfg.get("hd_audio", True),
-        "call_transparency": cfg.get("call_transparency", True),
-        "super_mic": cfg.get("super_mic", True),
         "auto_audio_switch": cfg.get("auto_audio_switch", True),
         "restore_profile_on_connect": cfg.get("restore_profile_on_connect", True),
         "notifications": cfg.get("notifications", True),
@@ -387,23 +333,8 @@ def restore_profile():
     if cfg.get("restore_profile_on_connect", True):
         anc = cfg.get("active_anc", "ANC_HIGH")
         send_command(anc)
-        eq = cfg.get("active_eq", "EQ_BALANCED")
-        send_command(eq)
-        if cfg.get("spatial_audio"):
-            send_command("SPATIAL_ON")
-        bass = cfg.get("bass_enhance", "BASS_OFF")
-        if bass != "BASS_OFF":
-            send_command(bass)
         if cfg.get("game_mode"):
             send_command("LOW_LATENCY_ON")
-        if cfg.get("in_ear"):
-            send_command("IN_EAR_ON")
-        if cfg.get("hd_audio", True):
-            send_command("HD_AUDIO_ON")
-        if cfg.get("call_transparency", True):
-            send_command("CALL_TRANSPARENCY_ON")
-        if cfg.get("super_mic", True):
-            send_command("SUPER_MIC_ON")
     if cfg.get("auto_audio_switch", True):
         set_bluetooth_audio_output()
     return True, "Profile restored"
@@ -449,48 +380,10 @@ def main():
             "transparency": ("ANC_TRANSPARENCY", "active_anc"),
             "trans": ("ANC_TRANSPARENCY", "active_anc"),
             "off": ("ANC_OFF", "active_anc"),
-            
-            # EQ
-            "eq-balanced": ("EQ_BALANCED", "active_eq"),
-            "eq-bass": ("EQ_BASS", "active_eq"),
-            "eq-treble": ("EQ_TREBLE", "active_eq"),
-            "eq-voice": ("EQ_VOICE", "active_eq"),
 
-            # Spatial Audio
-            "spatial-on": ("SPATIAL_ON", "spatial_audio", True),
-            "spatial-off": ("SPATIAL_OFF", "spatial_audio", False),
-
-            # Bass Enhance
-            "bass-off": ("BASS_OFF", "bass_enhance"),
-            "bass-1": ("BASS_LVL1", "bass_enhance"),
-            "bass-2": ("BASS_LVL2", "bass_enhance"),
-            "bass-3": ("BASS_LVL3", "bass_enhance"),
-            "bass-4": ("BASS_LVL4", "bass_enhance"),
-            "bass-5": ("BASS_LVL5", "bass_enhance"),
-
-            # Dual Connect
-            "dual-on": ("DUAL_CONNECT_ON", "dual_connect", True),
-            "dual-off": ("DUAL_CONNECT_OFF", "dual_connect", False),
-
-            # Gaming & In-Ear
+            # Gaming Mode
             "game-on": ("LOW_LATENCY_ON", "game_mode", True),
             "game-off": ("LOW_LATENCY_OFF", "game_mode", False),
-            "in-ear-on": ("IN_EAR_ON", "in_ear", True),
-            "in-ear-off": ("IN_EAR_OFF", "in_ear", False),
-
-            # HD Audio (LDAC Mode)
-            "hd-audio-on": ("HD_AUDIO_ON", "hd_audio", True),
-            "hd-audio-off": ("HD_AUDIO_OFF", "hd_audio", False),
-            "ldac-on": ("HD_AUDIO_ON", "hd_audio", True),
-            "ldac-off": ("HD_AUDIO_OFF", "hd_audio", False),
-
-            # Call Auto-Transparency
-            "call-trans-on": ("CALL_TRANSPARENCY_ON", "call_transparency", True),
-            "call-trans-off": ("CALL_TRANSPARENCY_OFF", "call_transparency", False),
-
-            # Super Mic / Clear Voice
-            "super-mic-on": ("SUPER_MIC_ON", "super_mic", True),
-            "super-mic-off": ("SUPER_MIC_OFF", "super_mic", False),
             
             # Preferences
             "auto-audio-on": ("auto_audio_switch", True),
