@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Nothing Ear Controller - Standalone Python CLI & RFCOMM Backend
-Supports Nothing Ear (1, 2, 3, a, stick, open) and CMF Buds lineup.
+Nothing Ear Linux Controller & Daemon
+Universal driver for Nothing Ear (1, 2, 3, (a), Open) & CMF Buds.
+Supports ANC, EQ, FastPair Telemetry, In-Ear & Live Daemon state monitoring.
 """
 
 import sys
@@ -9,34 +10,30 @@ import os
 import json
 import socket
 import subprocess
-import threading
 import time
 import re
+import threading
 
+CONFIG_PATH = os.path.expanduser("~/.config/nothing-ear/config.json")
+STATE_FILE = "/tmp/nothing_ear_live.json"
+LOG_FILE = "/tmp/nothing_ear_events.log"
 RFCOMM_CHANNEL = 15
-CONFIG_DIR = os.path.expanduser("~/.config/nothing-ear")
-CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 COMMANDS = {
-    # ANC Modes
-    "ANC_HIGH": bytes.fromhex("5560010ff00300cf010100e66f"),
-    "ANC_MID": bytes.fromhex("5560010ff00300d5010200e69f"),
-    "ANC_LOW": bytes.fromhex("5560010ff00300d7010300e70f"),
-    "ANC_ADAPTIVE": bytes.fromhex("5560010ff00300dd010400e53f"),
-    "ANC_TRANSPARENCY": bytes.fromhex("5560010ff00300cb010700c5af"),
-    "ANC_OFF": bytes.fromhex("5560010ff00300cd010500c447"),
-    
-    # Feature Toggles
-    "LOW_LATENCY_ON": bytes.fromhex("55600140f0020027010097f7"),
-    "LOW_LATENCY_OFF": bytes.fromhex("55600140f00200280200a704"),
-    "IN_EAR_ON": bytes.fromhex("55600104f00300260101017310"),
-    "IN_EAR_OFF": bytes.fromhex("55600104f0030025010100b294"),
-
-    # Equalizer DSP Presets
-    "EQ_BALANCED": bytes.fromhex("55600105f00200290100f7b5"),
-    "EQ_BASS": bytes.fromhex("55600105f002002a0200e774"),
-    "EQ_TREBLE": bytes.fromhex("55600105f002002b0300d737"),
-    "EQ_VOICE": bytes.fromhex("55600105f002002c040086fb"),
+    "ANC_HIGH": bytes.fromhex("55600102100100000326e0"),
+    "ANC_MID": bytes.fromhex("55600102100100000216c0"),
+    "ANC_LOW": bytes.fromhex("55600102100100000106a0"),
+    "ANC_ADAPTIVE": bytes.fromhex("556001021001000000f680"),
+    "ANC_TRANSPARENCY": bytes.fromhex("5560010210010000043600"),
+    "ANC_OFF": bytes.fromhex("5560010210010000052720"),
+    "EQ_BALANCED": bytes.fromhex("556001041001000000f480"),
+    "EQ_BASS": bytes.fromhex("55600104100100000104a0"),
+    "EQ_TREBLE": bytes.fromhex("55600104100100000214c0"),
+    "EQ_VOICE": bytes.fromhex("55600104100100000324e0"),
+    "LOW_LATENCY_ON": bytes.fromhex("5560010e10010000010ee0"),
+    "LOW_LATENCY_OFF": bytes.fromhex("5560010e1001000000fee0"),
+    "IN_EAR_ON": bytes.fromhex("55600103100100000105a0"),
+    "IN_EAR_OFF": bytes.fromhex("556001031001000000f580"),
 }
 
 DEFAULT_CONFIG = {
@@ -50,32 +47,44 @@ DEFAULT_CONFIG = {
 }
 
 def load_config():
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                data = json.load(f)
-                return {**DEFAULT_CONFIG, **data}
-        except Exception:
-            pass
-    return DEFAULT_CONFIG.copy()
-
-def save_config(cfg):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
+    if not os.path.exists(CONFIG_PATH):
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        save_config(DEFAULT_CONFIG)
+        return DEFAULT_CONFIG.copy()
     try:
-        with open(CONFIG_FILE, "w") as f:
-            json.dump(cfg, f, indent=2)
+        with open(CONFIG_PATH, "r") as f:
+            data = json.load(f)
+            merged = DEFAULT_CONFIG.copy()
+            merged.update(data)
+            return merged
     except Exception:
-        pass
+        return DEFAULT_CONFIG.copy()
+
+def save_config(config_dict):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(config_dict, f, indent=2)
 
 def get_device_mac():
     try:
         out = subprocess.check_output(["bluetoothctl", "devices"], text=True)
         for line in out.strip().splitlines():
-            if any(k.lower() in line.lower() for k in ["nothing ear", "cmf buds", "ear ("]):
-                parts = line.split()
-                if len(parts) >= 2:
-                    return parts[1]
+            parts = line.split(" ", 2)
+            if len(parts) >= 3:
+                mac = parts[1]
+                name = parts[2].lower()
+                if "nothing ear" in name or "ear (" in name or "cmf" in name:
+                    return mac
+        for line in out.strip().splitlines():
+            parts = line.split(" ", 2)
+            if len(parts) >= 3:
+                mac = parts[1]
+                try:
+                    info = subprocess.check_output(["bluetoothctl", "info", mac], text=True)
+                    if "Connected: yes" in info:
+                        return mac
+                except Exception:
+                    pass
     except Exception:
         pass
     return None
@@ -91,54 +100,56 @@ def is_device_connected(mac=None):
     except Exception:
         return False
 
+def parse_composite_telemetry(raw_bytes):
+    idx = 0
+    res = {}
+    while idx < len(raw_bytes) - 4:
+        if raw_bytes[idx] == 0x55 and raw_bytes[idx+1] == 0x60 and raw_bytes[idx+2] == 0x01:
+            cmd = raw_bytes[idx+3]
+            pkt_type = raw_bytes[idx+4]
+            if pkt_type == 0xe0 and idx + 8 < len(raw_bytes):
+                count = raw_bytes[idx+8]
+                p = idx + 9
+                for _ in range(count):
+                    if p + 1 < len(raw_bytes):
+                        eid = raw_bytes[p]
+                        eval_ = raw_bytes[p+1]
+                        p += 2
+                        is_chg = bool(eval_ & 0x80)
+                        val = eval_ & 0x7f
+                        if eid not in res or (val > 5 and not is_chg):
+                            res[eid] = {"val": val, "charging": is_chg, "raw": eval_}
+            idx += 6
+        else:
+            idx += 1
+    return res
+
 def query_live_battery_rfcomm(mac):
     l_pct, r_pct, c_pct = None, None, None
     l_chg, r_chg, c_chg = False, False, False
 
     try:
         sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        sock.settimeout(0.7)
+        sock.settimeout(0.8)
         sock.connect((mac, RFCOMM_CHANNEL))
 
-        # Query Left (0x08)
-        try:
-            sock.sendall(bytes.fromhex("55600108f000000000"))
-            time.sleep(0.04)
-            resp = sock.recv(64)
-            if len(resp) >= 9 and resp[0] == 0x55:
-                val = resp[8]
-                l_chg = bool(val & 0x80)
-                raw = val & 0x7f
-                l_pct = raw * 10 if raw <= 10 else raw
-        except Exception:
-            pass
-
-        # Query Right (0x09)
-        try:
-            sock.sendall(bytes.fromhex("55600109f000000000"))
-            time.sleep(0.04)
-            resp = sock.recv(64)
-            if len(resp) >= 9 and resp[0] == 0x55:
-                val = resp[8]
-                r_chg = bool(val & 0x80)
-                raw = val & 0x7f
-                r_pct = raw * 10 if raw <= 10 else raw
-        except Exception:
-            pass
-
-        # Query Case (0x02)
-        try:
-            sock.sendall(bytes.fromhex("55600102f000000000"))
-            time.sleep(0.04)
-            resp = sock.recv(64)
-            if len(resp) >= 9 and resp[0] == 0x55:
-                val = resp[8]
-                c_chg = bool(val & 0x80)
-                raw = val & 0x7f
-                if raw != 0x7f and raw > 0:
-                    c_pct = raw * 10 if raw <= 10 else raw
-        except Exception:
-            pass
+        for op in [0x01, 0x02]:
+            try:
+                sock.sendall(bytes([0x55, 0x60, 0x01, op, 0xf0, 0x00, 0x00, 0x00]))
+                time.sleep(0.05)
+                data = sock.recv(128)
+                parsed = parse_composite_telemetry(data)
+                if 2 in parsed and parsed[2]["val"] > 5:
+                    l_pct = parsed[2]["val"]
+                    l_chg = parsed[2]["charging"]
+                if 3 in parsed and parsed[3]["val"] > 5:
+                    r_pct = parsed[3]["val"]
+                    r_chg = parsed[3]["charging"]
+                if 4 in parsed and parsed[4]["val"] > 0:
+                    c_pct = parsed[4]["val"]
+                    c_chg = parsed[4]["charging"]
+            except Exception:
+                pass
 
         sock.close()
     except Exception:
@@ -152,34 +163,71 @@ def get_detailed_battery(mac=None):
     if not mac:
         return None
 
-    # 1. Live RFCOMM query
+    # 1. Read from Live Daemon State File (0ms instant response)
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                d_state = json.load(f)
+                if d_state.get("connected") or (d_state.get("left_level") or d_state.get("right_level")):
+                    l_pct = d_state.get("left_level")
+                    l_chg = d_state.get("left_charging", False)
+                    r_pct = d_state.get("right_level")
+                    r_chg = d_state.get("right_charging", False)
+                    c_pct = d_state.get("case_level") if d_state.get("case_open", True) else None
+                    c_chg = d_state.get("case_charging", False)
+
+                    if l_pct is not None or r_pct is not None:
+                        summary_parts = []
+                        if l_pct is not None:
+                            summary_parts.append(f"L: {l_pct}%{'⚡' if l_chg else ''}")
+                        if r_pct is not None:
+                            summary_parts.append(f"R: {r_pct}%{'⚡' if r_chg else ''}")
+                        if c_pct is not None:
+                            summary_parts.append(f"C: {c_pct}%{'⚡' if c_chg else ''}")
+
+                        return {
+                            "left": l_pct,
+                            "left_charging": l_chg,
+                            "right": r_pct,
+                            "right_charging": r_chg,
+                            "case": c_pct,
+                            "case_charging": c_chg,
+                            "has_case": (c_pct is not None),
+                            "summary": " • ".join(summary_parts) if summary_parts else None,
+                            "source": "daemon",
+                        }
+        except Exception:
+            pass
+
+    # 2. Live direct RFCOMM query fallback
     l_pct, l_chg, r_pct, r_chg, c_pct, c_chg = query_live_battery_rfcomm(mac)
 
-    # 2. Fast Pair ServiceData fallback
-    try:
-        out = subprocess.check_output(["bluetoothctl", "info", mac], text=True)
-        m = re.search(r"ServiceData Key: 0000fe2c[^\n]*\n\s*ServiceData Value:\s*\n\s*([0-9a-fA-F ]+)", out)
-        if m:
-            hex_str = m.group(1).replace(" ", "").strip()
-            raw = bytes.fromhex(hex_str)
-            if len(raw) >= 3:
-                b_left = raw[-3]
-                b_right = raw[-2]
-                b_case = raw[-1]
+    # 3. Fast Pair ServiceData fallback
+    if l_pct is None and r_pct is None:
+        try:
+            out = subprocess.check_output(["bluetoothctl", "info", mac], text=True)
+            m = re.search(r"ServiceData Key: 0000fe2c[^\n]*\n\s*ServiceData Value:\s*\n\s*([0-9a-fA-F ]+)", out)
+            if m:
+                hex_str = m.group(1).replace(" ", "").strip()
+                raw = bytes.fromhex(hex_str)
+                if len(raw) >= 3:
+                    b_left = raw[-3]
+                    b_right = raw[-2]
+                    b_case = raw[-1]
 
-                if l_pct is None and b_left != 0x7f:
-                    l_pct = b_left & 0x7f
-                    l_chg = bool(b_left & 0x80)
+                    if l_pct is None and b_left != 0x7f:
+                        l_pct = b_left & 0x7f
+                        l_chg = bool(b_left & 0x80)
 
-                if r_pct is None and b_right != 0x7f:
-                    r_pct = b_right & 0x7f
-                    r_chg = bool(b_right & 0x80)
+                    if r_pct is None and b_right != 0x7f:
+                        r_pct = b_right & 0x7f
+                        r_chg = bool(b_right & 0x80)
 
-                if c_pct is None and b_case != 0x7f:
-                    c_pct = b_case & 0x7f
-                    c_chg = bool(b_case & 0x80)
-    except Exception:
-        pass
+                    if c_pct is None and b_case != 0x7f:
+                        c_pct = b_case & 0x7f
+                        c_chg = bool(b_case & 0x80)
+        except Exception:
+            pass
 
     summary_parts = []
     if l_pct is not None:
@@ -200,6 +248,7 @@ def get_detailed_battery(mac=None):
         "case_charging": c_chg,
         "has_case": (c_pct is not None),
         "summary": summary,
+        "source": "rfcomm-direct",
     }
 
 def get_active_codec(mac=None):
@@ -310,6 +359,11 @@ def restore_profile():
         set_bluetooth_audio_output()
     return True, "Profile restored"
 
+def run_daemon():
+    """Runs the live background RFCOMM listener."""
+    from live_daemon import main as daemon_main
+    daemon_main()
+
 def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
@@ -317,6 +371,18 @@ def main():
             status = get_status_dict()
             print(json.dumps(status))
             sys.exit(0 if status["connected"] else 1)
+
+        if arg in ["battery", "--battery"]:
+            bat = get_detailed_battery()
+            if bat and bat.get("summary"):
+                print(f"🔋 {bat['summary']}")
+            else:
+                print("Battery status unavailable")
+            sys.exit(0 if bat else 1)
+
+        if arg in ["daemon", "run-daemon", "--daemon"]:
+            run_daemon()
+            sys.exit(0)
 
         if arg in ["switch-audio", "audio-switch", "set-audio"]:
             ok, msg = set_bluetooth_audio_output()
