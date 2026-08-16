@@ -333,8 +333,11 @@ def restore_profile():
     if cfg.get("restore_profile_on_connect", True):
         anc = cfg.get("active_anc", "ANC_HIGH")
         send_command(anc)
+        time.sleep(0.1)
         if cfg.get("game_mode"):
             send_command("LOW_LATENCY_ON")
+        else:
+            send_command("LOW_LATENCY_OFF")
     if cfg.get("auto_audio_switch", True):
         set_bluetooth_audio_output()
     return True, "Profile restored"

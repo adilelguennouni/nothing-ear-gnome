@@ -32,6 +32,34 @@ class NothingEarMenu extends PanelMenu.Button {
 
         this._buildMenu();
 
+        // BlueZ DBus Connection Monitor for instant auto-restore of Gaming Mode and ANC
+        this._dbusSubId = Gio.DBus.system.signal_subscribe(
+            'org.bluez',
+            'org.freedesktop.DBus.Properties',
+            'PropertiesChanged',
+            null,
+            null,
+            Gio.DBusSignalFlags.NONE,
+            (connection, sender, path, iface, signal, params) => {
+                try {
+                    let [ifaceName, changedProps] = params.recursiveUnpack();
+                    if (ifaceName === 'org.bluez.Device1' && changedProps && ('Connected' in changedProps)) {
+                        let isConnected = changedProps['Connected'];
+                        if (isConnected) {
+                            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 800, () => {
+                                let bin = this._getBinPath();
+                                GLib.spawn_command_line_async(`${bin} restore`);
+                                this._updateStatus();
+                                return GLib.SOURCE_REMOVE;
+                            });
+                        } else {
+                            this._updateStatus();
+                        }
+                    }
+                } catch (e) {}
+            }
+        );
+
         this._openStateChangedId = this.menu.connect('open-state-changed', (menu, isOpen) => {
             if (isOpen) {
                 this._updateStatus();
@@ -331,6 +359,10 @@ class NothingEarMenu extends PanelMenu.Button {
     }
 
     destroy() {
+        if (this._dbusSubId) {
+            Gio.DBus.system.signal_unsubscribe(this._dbusSubId);
+            this._dbusSubId = null;
+        }
         if (this._notifSource) {
             this._notifSource.destroy();
             this._notifSource = null;
