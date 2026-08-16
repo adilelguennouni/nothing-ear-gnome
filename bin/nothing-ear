@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Nothing Ear Linux Controller & Daemon
+Nothing Ear Linux Controller
 Universal driver for Nothing Ear (1, 2, 3, (a), Open) & CMF Buds.
-Supports ANC, EQ, FastPair Telemetry, In-Ear & Live Daemon state monitoring.
+Supports ANC, EQ, FastPair Telemetry, In-Ear & Audio Routing.
 """
 
 import sys
@@ -12,12 +12,8 @@ import socket
 import subprocess
 import time
 import re
-import threading
 
 CONFIG_PATH = os.path.expanduser("~/.config/nothing-ear/config.json")
-STATE_FILE = "/tmp/nothing_ear_live.json"
-LOG_FILE = "/tmp/nothing_ear_events.log"
-UNIX_SOCK_PATH = "/tmp/nothing_ear.sock"
 RFCOMM_CHANNEL = 15
 
 COMMANDS = {
@@ -131,13 +127,13 @@ def query_live_battery_rfcomm(mac):
 
     try:
         sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-        sock.settimeout(0.8)
+        sock.settimeout(0.4)
         sock.connect((mac, RFCOMM_CHANNEL))
 
         for op in [0x01, 0x02]:
             try:
                 sock.sendall(bytes([0x55, 0x60, 0x01, op, 0xf0, 0x00, 0x00, 0x00]))
-                time.sleep(0.05)
+                time.sleep(0.04)
                 data = sock.recv(128)
                 parsed = parse_composite_telemetry(data)
                 if 2 in parsed and parsed[2]["val"] > 5:
@@ -164,69 +160,42 @@ def get_detailed_battery(mac=None):
     if not mac:
         return None
 
-    # 1. Read from Live Daemon State File (0ms instant response)
-    if os.path.exists(STATE_FILE):
+    # 1. Fast Pair ServiceData (Fastest 0ms lookup)
+    l_pct, r_pct, c_pct = None, None, None
+    l_chg, r_chg, c_chg = False, False, False
+
+    try:
+        out = subprocess.check_output(["bluetoothctl", "info", mac], text=True)
+        m = re.search(r"ServiceData Key: 0000fe2c[^\n]*\n\s*ServiceData Value:\s*\n\s*([0-9a-fA-F ]+)", out)
+        if m:
+            hex_str = m.group(1).replace(" ", "").strip()
+            raw = bytes.fromhex(hex_str)
+            if len(raw) >= 3:
+                b_left = raw[-3]
+                b_right = raw[-2]
+                b_case = raw[-1]
+
+                if b_left != 0x7f:
+                    l_pct = b_left & 0x7f
+                    l_chg = bool(b_left & 0x80)
+
+                if b_right != 0x7f:
+                    r_pct = b_right & 0x7f
+                    r_chg = bool(b_right & 0x80)
+
+                if b_case != 0x7f:
+                    c_pct = b_case & 0x7f
+                    c_chg = bool(b_case & 0x80)
+    except Exception:
+        pass
+
+    # 2. RFCOMM Composite Telemetry if connected and values need refinement
+    if is_device_connected(mac):
         try:
-            with open(STATE_FILE, "r") as f:
-                d_state = json.load(f)
-                if d_state.get("connected") or (d_state.get("left_level") or d_state.get("right_level")):
-                    l_pct = d_state.get("left_level")
-                    l_chg = d_state.get("left_charging", False)
-                    r_pct = d_state.get("right_level")
-                    r_chg = d_state.get("right_charging", False)
-                    c_pct = d_state.get("case_level") if d_state.get("case_open", True) else None
-                    c_chg = d_state.get("case_charging", False)
-
-                    if l_pct is not None or r_pct is not None:
-                        summary_parts = []
-                        if l_pct is not None:
-                            summary_parts.append(f"L: {l_pct}%{'⚡' if l_chg else ''}")
-                        if r_pct is not None:
-                            summary_parts.append(f"R: {r_pct}%{'⚡' if r_chg else ''}")
-                        if c_pct is not None:
-                            summary_parts.append(f"C: {c_pct}%{'⚡' if c_chg else ''}")
-
-                        return {
-                            "left": l_pct,
-                            "left_charging": l_chg,
-                            "right": r_pct,
-                            "right_charging": r_chg,
-                            "case": c_pct,
-                            "case_charging": c_chg,
-                            "has_case": (c_pct is not None),
-                            "summary": " • ".join(summary_parts) if summary_parts else None,
-                            "source": "daemon",
-                        }
-        except Exception:
-            pass
-
-    # 2. Live direct RFCOMM query fallback
-    l_pct, l_chg, r_pct, r_chg, c_pct, c_chg = query_live_battery_rfcomm(mac)
-
-    # 3. Fast Pair ServiceData fallback
-    if l_pct is None and r_pct is None:
-        try:
-            out = subprocess.check_output(["bluetoothctl", "info", mac], text=True)
-            m = re.search(r"ServiceData Key: 0000fe2c[^\n]*\n\s*ServiceData Value:\s*\n\s*([0-9a-fA-F ]+)", out)
-            if m:
-                hex_str = m.group(1).replace(" ", "").strip()
-                raw = bytes.fromhex(hex_str)
-                if len(raw) >= 3:
-                    b_left = raw[-3]
-                    b_right = raw[-2]
-                    b_case = raw[-1]
-
-                    if l_pct is None and b_left != 0x7f:
-                        l_pct = b_left & 0x7f
-                        l_chg = bool(b_left & 0x80)
-
-                    if r_pct is None and b_right != 0x7f:
-                        r_pct = b_right & 0x7f
-                        r_chg = bool(b_right & 0x80)
-
-                    if c_pct is None and b_case != 0x7f:
-                        c_pct = b_case & 0x7f
-                        c_chg = bool(b_case & 0x80)
+            rl, rlc, rr, rrc, rc, rcc = query_live_battery_rfcomm(mac)
+            if rl is not None: l_pct, l_chg = rl, rlc
+            if rr is not None: r_pct, r_chg = rr, rrc
+            if rc is not None: c_pct, c_chg = rc, rcc
         except Exception:
             pass
 
@@ -249,7 +218,6 @@ def get_detailed_battery(mac=None):
         "case_charging": c_chg,
         "has_case": (c_pct is not None),
         "summary": summary,
-        "source": "rfcomm-direct",
     }
 
 def get_active_codec(mac=None):
@@ -316,7 +284,7 @@ def set_bluetooth_audio_output(mac=None):
             return True, sink
         except Exception as e:
             return False, str(e)
-    return False, "Bluetooth audio sink not found (Device connecting...)"
+    return False, "Bluetooth audio sink not found (Device not connected as audio output)"
 
 def get_status_dict():
     mac = get_device_mac()
@@ -341,39 +309,21 @@ def get_status_dict():
     }
 
 def send_command(command_key, mac=None):
-    cmd = COMMANDS.get(command_key)
-    if not cmd:
-        return False, "Unknown command"
-
-    # 1. Try sending via Live Daemon IPC Socket (/tmp/nothing_ear.sock)
-    if os.path.exists(UNIX_SOCK_PATH):
-        try:
-            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            client.settimeout(1.2)
-            client.connect(UNIX_SOCK_PATH)
-            req = {"action": "send_command", "cmd": command_key}
-            client.sendall(json.dumps(req).encode('utf-8'))
-            resp_data = client.recv(1024).decode('utf-8')
-            client.close()
-            if resp_data:
-                resp = json.loads(resp_data)
-                if resp.get("ok"):
-                    return True, "Success"
-        except Exception:
-            pass
-
-    # 2. Fallback to direct RFCOMM socket if daemon is not running
     if not mac:
         mac = get_device_mac()
     if not mac:
         return False, "No Nothing or CMF earbuds detected"
 
+    cmd = COMMANDS.get(command_key)
+    if not cmd:
+        return False, "Unknown command"
+
     sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-    sock.settimeout(2.5)
+    sock.settimeout(2.0)
     try:
         sock.connect((mac, RFCOMM_CHANNEL))
         sock.sendall(cmd)
-        time.sleep(0.10)
+        time.sleep(0.08)
         try:
             sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -401,11 +351,6 @@ def restore_profile():
         set_bluetooth_audio_output()
     return True, "Profile restored"
 
-def run_daemon():
-    """Runs the live background RFCOMM listener & IPC bridge."""
-    import live_daemon
-    live_daemon.main()
-
 def main():
     if len(sys.argv) > 1:
         arg = sys.argv[1].lower()
@@ -421,10 +366,6 @@ def main():
             else:
                 print("Battery status unavailable")
             sys.exit(0 if bat else 1)
-
-        if arg in ["daemon", "run-daemon", "--daemon"]:
-            run_daemon()
-            sys.exit(0)
 
         if arg in ["switch-audio", "audio-switch", "set-audio"]:
             ok, msg = set_bluetooth_audio_output()
@@ -482,15 +423,14 @@ def main():
                     else:
                         cfg[entry[1]] = cmd
                     save_config(cfg)
-                    print(f"✓ Command '{arg}' sent successfully and saved to config")
+                    print(f"✓ Command '{arg}' sent successfully")
                 else:
-                    # Even if device was offline, save the preference
                     if len(entry) >= 3 and isinstance(entry[2], bool):
                         cfg[entry[1]] = entry[2]
                     else:
                         cfg[entry[1]] = cmd
                     save_config(cfg)
-                    print(f"⚠️ Preference '{arg}' saved (Device returned: {msg})")
+                    print(f"⚠️ Preference '{arg}' saved (Device status: {msg})")
                 sys.exit(0 if success else 1)
         else:
             print("Usage: nothing-ear [command]")
