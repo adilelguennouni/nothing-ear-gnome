@@ -319,20 +319,23 @@ def send_command(command_key, mac=None):
         return False, "Unknown command"
 
     sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
-    sock.settimeout(2.0)
+    sock.settimeout(2.5)
     try:
         sock.connect((mac, RFCOMM_CHANNEL))
         sock.sendall(cmd)
-        time.sleep(0.08)
         try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
+            sock.settimeout(1.0)
+            ack = sock.recv(64)
+        except Exception:
             pass
         return True, "Success"
     except Exception as e:
         return False, str(e)
     finally:
-        sock.close()
+        try:
+            sock.close()
+        except Exception:
+            pass
 
 def restore_profile():
     if not is_device_connected():
