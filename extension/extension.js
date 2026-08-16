@@ -46,7 +46,7 @@ class NothingEarMenu extends PanelMenu.Button {
                     if (ifaceName === 'org.bluez.Device1' && changedProps && ('Connected' in changedProps)) {
                         let isConnected = changedProps['Connected'];
                         if (isConnected) {
-                            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 800, () => {
+                            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 350, () => {
                                 let bin = this._getBinPath();
                                 GLib.spawn_command_line_async(`${bin} restore`);
                                 this._updateStatus();
