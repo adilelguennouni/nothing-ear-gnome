@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Nothing Ear Controller
+Comment=Contrôle de Réduction de Bruit (ANC) et Modes Nothing Ear
+Exec=nothing-ear
+Icon=audio-headphones
+Terminal=false
+Type=Application
+Categories=Audio;AudioVideo;Settings;
+Keywords=Nothing;Ear;ANC;Bluetooth;Headphones;Sound;

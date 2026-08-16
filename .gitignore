@@ -1,0 +1,23 @@
+
+*~
+*$py.class
+.config/
+.DS_Store
+env/
+# Extension builds
+.idea/
+*.log
+# Logs & Config
+# OS & Editors
+__pycache__/
+*.py[cod]
+# Python
+.Python
+*.shell-extension.zip
+*.so
+*.swo
+*.swp
+.venv/
+venv/
+.vscode/
+*.zip
