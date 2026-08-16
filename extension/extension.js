@@ -30,6 +30,8 @@ class NothingEarMenu extends PanelMenu.Button {
         });
         this.add_child(icon);
 
+        this._restoreTimeoutId = null;
+
         this._buildMenu();
 
         // BlueZ DBus Connection Monitor for instant auto-restore of Gaming Mode and ANC
@@ -45,8 +47,13 @@ class NothingEarMenu extends PanelMenu.Button {
                     let [ifaceName, changedProps] = params.recursiveUnpack();
                     if (ifaceName === 'org.bluez.Device1' && changedProps && ('Connected' in changedProps)) {
                         let isConnected = changedProps['Connected'];
+                        if (this._restoreTimeoutId) {
+                            GLib.Source.remove(this._restoreTimeoutId);
+                            this._restoreTimeoutId = null;
+                        }
                         if (isConnected) {
-                            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 350, () => {
+                            this._restoreTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 350, () => {
+                                this._restoreTimeoutId = null;
                                 let bin = this._getBinPath();
                                 GLib.spawn_command_line_async(`${bin} restore`);
                                 this._updateStatus();
@@ -359,6 +366,10 @@ class NothingEarMenu extends PanelMenu.Button {
     }
 
     destroy() {
+        if (this._restoreTimeoutId) {
+            GLib.Source.remove(this._restoreTimeoutId);
+            this._restoreTimeoutId = null;
+        }
         if (this._dbusSubId) {
             Gio.DBus.system.signal_unsubscribe(this._dbusSubId);
             this._dbusSubId = null;
