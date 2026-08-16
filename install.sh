@@ -32,3 +32,12 @@ fi
 
 echo "✅ Installation completed successfully!"
 echo "👉 Reload GNOME Shell with: Alt + F2, then type 'r' and press Enter."
+
+# Check if FastConnectable is enabled in BlueZ
+if [ -f "/etc/bluetooth/main.conf" ]; then
+    if ! grep -q "^FastConnectable = true" /etc/bluetooth/main.conf; then
+        echo ""
+        echo "💡 [Recommandation Vitesse] Pour une reconnexion ultra-rapide (~300ms au lieu de 3s), lancez :"
+        echo "   sudo sed -i 's/#FastConnectable = false/FastConnectable = true/' /etc/bluetooth/main.conf && sudo systemctl restart bluetooth"
+    fi
+fi
